@@ -10,6 +10,7 @@ import rospkg
 import errno
 import os
 import csv
+import tf
 
 
 class DataLogger(object):
@@ -37,6 +38,7 @@ class DataLogger(object):
         rospy.Subscriber('camera/image_raw', Image, self.process_image)
         rospy.Subscriber('bump', Bump, self.process_bump)
         rospy.Subscriber('accel', Accel, self.process_accel)
+        self.tf_listener = tf.TransformListener()
         self.b = CvBridge()
         cv2.namedWindow('camera image')
         cv2.setMouseCallback('camera image', self.process_mouse_event)
@@ -62,28 +64,35 @@ class DataLogger(object):
                            (msg.accelXInG, msg.accelYInG, msg.accelZInG))
 
     def process_image(self, m):
+        im = self.b.imgmsg_to_cv2(m, desired_encoding="bgr8")
+        print(im.shape)
         self.q.put((m.header.stamp,
                     self.last_x,
                     self.last_y,
                     self.lbutton_down_registered,
-                    self.b.imgmsg_to_cv2(m, desired_encoding="passthrough")))
+                    im))
         self.lbutton_down_registered = False
 
     def run(self):
         with open(self.data_save_path + "/metadata.csv", "w") as csv_file:
             writer = csv.writer(csv_file)
             image_count = 0
-            writer.writerows(['stamp',
-                              'mouse_x',
-                              'mouse_y',
-                              'lbutton_down',
-                              'key'] +
-                             ['ranges_' + str(i) for i in range(361)] +
-                             ['bump_leftFront',
-                              'bump_leftSide',
-                              'bump_rightFront',
-                              'bump_rightSide'] +
-                             ['accelXInG', 'accelYInG', 'accelZInG'])
+            writer.writerows([['stamp',
+                               'mouse_x',
+                               'mouse_y',
+                               'lbutton_down',
+                               'key'] +
+                              ['ranges_' + str(i) for i in range(361)] +
+                              ['bump_leftFront',
+                               'bump_leftSide',
+                               'bump_rightFront',
+                               'bump_rightSide'] +
+                              ['accelXInG', 'accelYInG', 'accelZInG'],
+                              ['odom_trans_x', 'odom_trans_y', 'odom_trans_z'],
+                              ['odom_orient_x',
+                               'odom_orient_y',
+                               'odom_orient_z',
+                               'odom_orient_w']])
             while not rospy.is_shutdown():
                 stamp, x, y, lbutton_down, image = self.q.get(timeout=10)
 
@@ -104,6 +113,18 @@ class DataLogger(object):
                         self.sensor_latency_tolerance):
                     accel = self.last_accel[1]
 
+                # check for odom transform
+                transform_ts = \
+                    self.tf_listener.getLatestCommonTime('odom',
+                                                         'base_link')
+                trans = [float('Inf')]*3
+                rot = [float('Inf')]*4
+                if abs(transform_ts - stamp) < self.sensor_latency_tolerance:
+                    trans, rot = self.tf_listener.lookupTransform('odom',
+                                                                  'base_link',
+                                                                  transform_ts)
+                    print trans
+
                 cv2.imshow("camera image", image)
                 key = cv2.waitKey(5) & 0xFF
 
@@ -116,7 +137,11 @@ class DataLogger(object):
                                    y,
                                    int(lbutton_down),
                                    key] +
-                                  list(scan) + list(bump) + list(accel)])
+                                  list(scan) +
+                                  list(bump) +
+                                  list(accel) +
+                                  list(trans) +
+                                  list(rot)])
                 image_count += 1
 
 
