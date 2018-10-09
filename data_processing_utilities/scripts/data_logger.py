@@ -4,6 +4,7 @@ import rospy
 import Queue as queue
 from sensor_msgs.msg import LaserScan, Image
 from neato_node.msg import Bump, Accel
+from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 import cv2
 import rospkg
@@ -18,6 +19,7 @@ class DataLogger(object):
         self.last_ranges = None
         self.last_bump = None
         self.last_accel = None
+        self.last_cmd_vel = None
         self.lbutton_down_registered = False
         self.last_x, self.last_y = -1, -1
         self.q = queue.Queue()
@@ -38,6 +40,7 @@ class DataLogger(object):
         rospy.Subscriber('camera/image_raw', Image, self.process_image)
         rospy.Subscriber('bump', Bump, self.process_bump)
         rospy.Subscriber('accel', Accel, self.process_accel)
+        rospy.Subscriber('cmd_vel', Twist, self.process_cmd_vel)
         self.tf_listener = tf.TransformListener()
         self.b = CvBridge()
         cv2.namedWindow('camera image')
@@ -51,6 +54,11 @@ class DataLogger(object):
             # this flag gets consumed elsewhere
             self.lbutton_down_registered = True
         self.last_x, self.last_y = x, y
+
+    def process_cmd_vel(self, msg):
+        self.last_cmd_vel = (rospy.Time.now(),
+                             (msg.linear.x,
+                              msg.angular.z))
 
     def process_bump(self, msg):
         self.last_bump = (rospy.Time.now(),
@@ -78,17 +86,20 @@ class DataLogger(object):
             writer = csv.writer(csv_file)
             image_count = 0
             writer.writerows([['stamp',
+                               'image_file_name',
                                'mouse_x',
                                'mouse_y',
                                'lbutton_down',
                                'key'] +
                               ['ranges_' + str(i) for i in range(361)] +
+                              ['cmd_vel_linear_x',
+                               'cmd_vel_angular_z'] +
                               ['bump_leftFront',
                                'bump_leftSide',
                                'bump_rightFront',
                                'bump_rightSide'] +
-                              ['accelXInG', 'accelYInG', 'accelZInG'],
-                              ['odom_trans_x', 'odom_trans_y', 'odom_trans_z'],
+                              ['accelXInG', 'accelYInG', 'accelZInG'] +
+                              ['odom_trans_x', 'odom_trans_y', 'odom_trans_z'] +
                               ['odom_orient_x',
                                'odom_orient_y',
                                'odom_orient_z',
@@ -96,12 +107,16 @@ class DataLogger(object):
             while not rospy.is_shutdown():
                 stamp, x, y, lbutton_down, image = self.q.get(timeout=10)
 
-                # TODO: double check that this is actual 361 (we are using
                 # extrapolated scan so I don't know if it is or isn't)
                 scan = [float('Inf')]*361
                 if (self.last_ranges and abs(stamp - self.last_ranges[0]) <
                         self.sensor_latency_tolerance):
                     scan = self.last_ranges[1]
+
+                cmd_vel = [float('Inf')]*2
+                if (self.last_cmd_vel and abs(stamp - self.last_cmd_vel[0]) <
+                        self.sensor_latency_tolerance):
+                    cmd_vel = self.last_cmd_vel[1]
 
                 bump = [float('Inf')]*4
                 if (self.last_bump and abs(stamp - self.last_bump[0]) <
@@ -138,6 +153,7 @@ class DataLogger(object):
                                    int(lbutton_down),
                                    key] +
                                   list(scan) +
+                                  list(cmd_vel) +
                                   list(bump) +
                                   list(accel) +
                                   list(trans) +
