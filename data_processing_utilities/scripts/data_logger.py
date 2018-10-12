@@ -23,7 +23,7 @@ class DataLogger(object):
         self.lbutton_down_registered = False
         self.last_x, self.last_y = -1, -1
         self.q = queue.Queue()
-        self.sensor_latency_tolerance = rospy.Duration(0.3)
+        self.sensor_latency_tolerance = rospy.Duration(0.5)
 
         rospy.init_node('data_logger')
         r = rospkg.RosPack()
@@ -99,7 +99,9 @@ class DataLogger(object):
                                'bump_rightFront',
                                'bump_rightSide'] +
                               ['accelXInG', 'accelYInG', 'accelZInG'] +
-                              ['odom_trans_x', 'odom_trans_y', 'odom_trans_z'] +
+                              ['odom_trans_x',
+                               'odom_trans_y',
+                               'odom_trans_z'] +
                               ['odom_orient_x',
                                'odom_orient_y',
                                'odom_orient_z',
@@ -112,10 +114,10 @@ class DataLogger(object):
                 if (self.last_ranges and abs(stamp - self.last_ranges[0]) <
                         self.sensor_latency_tolerance):
                     scan = self.last_ranges[1]
-
+                else:
+                    print("TIME OUT LASER")
                 cmd_vel = [float('Inf')]*2
-                if (self.last_cmd_vel and abs(stamp - self.last_cmd_vel[0]) <
-                        self.sensor_latency_tolerance):
+                if self.last_cmd_vel:
                     cmd_vel = self.last_cmd_vel[1]
 
                 bump = [float('Inf')]*4
